@@ -56,9 +56,9 @@
   },
   "wireit": {
     "copy-catalog": {
-      "command": "cp ../../../catalogs/mcp/catalog.json src/catalog.json",
+      "command": "cp ../../../catalogs/mcp/v1/catalog.json src/catalog.json",
       "files": [
-        "../../../catalogs/mcp/catalog.json"
+        "../../../catalogs/mcp/v1/catalog.json"
       ],
       "output": [
         "src/catalog.json"
@@ -171,7 +171,7 @@
     "test": {
       "dependencies": [
         "test:node",
-        "test:types"
+        "test:karma"
       ]
     },
     "lint": {
