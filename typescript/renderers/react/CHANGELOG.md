@@ -1,5 +1,7 @@
 ## Unreleased
 
+- `createComponentImplementation` and `createBinderlessComponentImplementation` keep the `allowedParents` and `allowedChildren` of the `ComponentApi` they are given, so `MessageProcessor` enforces composition constraints for React custom components ([#3533](https://github.com/a2ui-project/a2ui/issues/3533)).
+
 ## 0.14.0
 
 - Bump dependencies for compatibility with `@a2ui/web_core: ^0.14.0`.

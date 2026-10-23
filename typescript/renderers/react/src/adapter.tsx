@@ -33,6 +33,20 @@ import type {
 // --- Component Factories ---
 
 /**
+ * The `ComponentApi` fields an implementation carries. Copied one by one rather
+ * than spread, so an `api` that is itself an implementation (e.g. with a
+ * `tagName`) doesn't leak its rendering fields into the new one.
+ */
+function componentApiFields(api: ComponentApi): ComponentApi {
+  return {
+    name: api.name,
+    schema: api.schema,
+    allowedParents: api.allowedParents,
+    allowedChildren: api.allowedChildren,
+  };
+}
+
+/**
  * Creates a React component implementation using the deep generic binder.
  */
 export function createComponentImplementation<Api extends ComponentApi>(
@@ -98,8 +112,7 @@ export function createComponentImplementation<Api extends ComponentApi>(
   NodeView.displayName = `${api.name}.view`;
 
   return {
-    name: api.name,
-    schema: api.schema,
+    ...componentApiFields(api),
     render: ReactWrapper,
     view: NodeView,
   };
@@ -122,8 +135,7 @@ export function createBinderlessComponentImplementation(
   NodeView.displayName = `${api.name}.view`;
 
   return {
-    name: api.name,
-    schema: api.schema,
+    ...componentApiFields(api),
     render: RenderComponent,
     view: NodeView,
   };
