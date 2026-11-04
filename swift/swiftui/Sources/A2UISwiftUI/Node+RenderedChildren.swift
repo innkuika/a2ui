@@ -15,7 +15,8 @@
 import A2UICore
 
 extension Node {
-  /// Returns the children under `key` that `Surface.render` can draw.
+  /// Returns the children under `key` that render something: a component `Surface.render` can
+  /// draw, or a view from `fallbacks`.
   ///
   /// `ComponentNodeView` renders `EmptyView()` for the others. Layout containers leave them out
   /// so that they take no spacing or `Spacer` slot.
@@ -23,11 +24,17 @@ extension Node {
   public func renderedChildren(
     for key: String,
     in catalogs: [String: Catalog<ComponentImplementation>],
-    defaultCatalogID: String? = nil
+    defaultCatalogID: String? = nil,
+    fallbacks: A2UIFallbacks = A2UIFallbacks()
   ) -> [Node] {
     children(for: key).filter { child in
-      Surface.implementation(for: child, using: catalogs, defaultCatalogID: defaultCatalogID)
-        != nil
+      ComponentNodeView.content(
+        for: child,
+        catalogs: catalogs,
+        defaultCatalogID: defaultCatalogID,
+        fallbacks: fallbacks,
+        parentComponentType: type
+      ) != nil
     }
   }
 }

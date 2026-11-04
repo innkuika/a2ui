@@ -22,9 +22,15 @@ import os
 /// The rendered view gets the node's `accessibility` attributes applied through
 /// ``A2UIAccessibilityModifier``. When the component applied the label and hint to its own
 /// control with ``SwiftUI/View/a2uiAccessibilityControl(for:)``, they are left off the root.
+///
+/// A node no catalog can build, and a pending or cyclic placeholder, renders the surface's
+/// ``A2UIFallbacks`` view, or nothing. The rendered component publishes its type as
+/// ``SwiftUI/EnvironmentValues/a2uiParentComponentType`` for its children's fallbacks.
 public struct ComponentNodeView: View {
   @Environment(\.a2uiCatalogs) private var catalogs
   @Environment(\.a2uiDefaultCatalogID) private var defaultCatalogID
+  @Environment(\.a2uiFallbacks) private var fallbacks
+  @Environment(\.a2uiParentComponentType) private var parentComponentType
 
   public let node: Node
 
@@ -34,14 +40,49 @@ public struct ComponentNodeView: View {
 
   public var body: some View {
     let _ = (node.properties, node.metadata)
-    if let renderedView = Surface.render(
-      node: node, using: catalogs, defaultCatalogID: defaultCatalogID)
-    {
-      renderedView
+    switch Self.content(
+      for: node,
+      catalogs: catalogs,
+      defaultCatalogID: defaultCatalogID,
+      fallbacks: fallbacks,
+      parentComponentType: parentComponentType
+    ) {
+    case .component(let implementation):
+      implementation.builder(node)
         .modifier(ComponentAccessibilityHostModifier(node: node))
-    } else {
-      let _ = Self.logMissingViewBuilder(for: node, defaultCatalogID: defaultCatalogID)
+        .environment(\.a2uiParentComponentType, node.type)
+    case .fallback(let view):
+      view
+    case nil:
       EmptyView()
+    }
+  }
+
+  /// What a node renders.
+  enum NodeContent {
+    case component(ComponentImplementation)
+    case fallback(AnyView)
+  }
+
+  /// What `node` renders, or `nil` when it renders nothing.
+  @MainActor
+  static func content(
+    for node: Node,
+    catalogs: [String: Catalog<ComponentImplementation>],
+    defaultCatalogID: String?,
+    fallbacks: A2UIFallbacks,
+    parentComponentType: String?
+  ) -> NodeContent? {
+    if let implementation = Surface.implementation(
+      for: node, using: catalogs, defaultCatalogID: defaultCatalogID)
+    {
+      return .component(implementation)
+    }
+    if node.state == .resolved || node.state == .unknownType {
+      logMissingViewBuilder(for: node, defaultCatalogID: defaultCatalogID)
+    }
+    return fallbacks.view(for: node, parentComponentType: parentComponentType).map {
+      .fallback($0)
     }
   }
 

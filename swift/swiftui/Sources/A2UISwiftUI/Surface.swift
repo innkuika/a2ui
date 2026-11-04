@@ -19,44 +19,58 @@ import SwiftUI
 ///
 /// `Surface` observes a ``SurfaceViewModel`` and renders the resolved
 /// component tree using registered component view builders from the provided
-/// SwiftUI component catalogs. The active theme and catalogs are propagated through
-/// the SwiftUI environment.
+/// SwiftUI component catalogs. The active theme, catalogs and ``A2UIFallbacks`` are propagated
+/// through the SwiftUI environment.
 public struct Surface: View {
   @ObservedObject public var viewModel: SurfaceViewModel
 
   public let catalogs: [String: Catalog<ComponentImplementation>]
   public let defaultCatalogID: String?
   public let surfaceID: String
+  public let fallbacks: A2UIFallbacks
 
   public init(
     viewModel: SurfaceViewModel,
     catalogs: [Catalog<ComponentImplementation>] = [],
-    defaultCatalogID: String? = nil
+    defaultCatalogID: String? = nil,
+    fallbacks: A2UIFallbacks = A2UIFallbacks()
   ) {
     self.viewModel = viewModel
     let dict = Dictionary(catalogs.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     self.catalogs = dict
     self.defaultCatalogID = defaultCatalogID ?? catalogs.first?.id
     self.surfaceID = viewModel.surfaceID
+    self.fallbacks = fallbacks
   }
 
   public init(
     viewModel: SurfaceViewModel,
     catalogs: [String: Catalog<ComponentImplementation>],
-    defaultCatalogID: String? = nil
+    defaultCatalogID: String? = nil,
+    fallbacks: A2UIFallbacks = A2UIFallbacks()
   ) {
     self.viewModel = viewModel
     self.catalogs = catalogs
     self.defaultCatalogID = defaultCatalogID ?? catalogs.keys.sorted().first
     self.surfaceID = viewModel.surfaceID
+    self.fallbacks = fallbacks
   }
 
   public init(
     viewModel: SurfaceViewModel,
-    catalog: Catalog<ComponentImplementation>
+    catalog: Catalog<ComponentImplementation>,
+    fallbacks: A2UIFallbacks = A2UIFallbacks()
   ) {
-    self.init(viewModel: viewModel, catalogs: [catalog], defaultCatalogID: catalog.id)
+    self.init(
+      viewModel: viewModel,
+      catalogs: [catalog],
+      defaultCatalogID: catalog.id,
+      fallbacks: fallbacks
+    )
   }
+
+  /// The id of the root component, which the pending fallback gets before the root arrives.
+  static let rootComponentID = "root"
 
   public var body: some View {
     if let rootNode = viewModel.rootNode {
@@ -65,6 +79,14 @@ public struct Surface: View {
         .environment(\.a2uiSurfaceMetadata, viewModel.metadata)
         .environment(\.a2uiCatalogs, catalogs)
         .environment(\.a2uiDefaultCatalogID, defaultCatalogID)
+        .environment(\.a2uiFallbacks, fallbacks)
+        .environment(\.a2uiParentComponentType, nil)
+    } else if let pending = fallbacks.pending?(
+      A2UIPendingInfo(componentID: Self.rootComponentID)
+    ) {
+      pending
+        .environment(\.a2uiTheme, viewModel.theme)
+        .environment(\.a2uiSurfaceMetadata, viewModel.metadata)
     } else {
       // Nothing to show until the root component arrives.
       EmptyView()
@@ -92,7 +114,7 @@ extension Surface {
   /// node.
   ///
   /// Looks in the node's own catalog, then in `defaultCatalogID`, then in any catalog (in sorted
-  /// catalog-ID order) that has the node's type.
+  /// catalog-ID order) that has the node's type. A pending or cyclic placeholder has none.
   ///
   /// - Parameters:
   ///   - node: The resolved engine node.
@@ -104,6 +126,12 @@ extension Surface {
     using catalogs: [String: Catalog<ComponentImplementation>],
     defaultCatalogID: String? = nil
   ) -> ComponentImplementation? {
+    switch node.state {
+    case .pending, .cyclic:
+      return nil
+    case .resolved, .unknownType:
+      break
+    }
     if let catalogID = node.catalogID,
       let component = catalogs[catalogID]?.components[node.type]
     {

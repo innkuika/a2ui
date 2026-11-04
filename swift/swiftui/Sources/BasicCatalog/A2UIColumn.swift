@@ -35,13 +35,15 @@ public struct A2UIColumn: View {
 
   @Environment(\.a2uiCatalogs) private var catalogs
   @Environment(\.a2uiDefaultCatalogID) private var defaultCatalogID
+  @Environment(\.a2uiFallbacks) private var fallbacks
 
   public init(node: Node) {
     self.node = node
   }
 
   private var children: [Node] {
-    node.renderedChildren(for: "children", in: catalogs, defaultCatalogID: defaultCatalogID)
+    node.renderedChildren(
+      for: "children", in: catalogs, defaultCatalogID: defaultCatalogID, fallbacks: fallbacks)
   }
 
   private var align: String {

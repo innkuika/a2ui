@@ -48,6 +48,31 @@ struct ChatView: View {
 }
 ```
 
+### Fallbacks for components that can't render
+
+By default a component that hasn't arrived yet, or can't render (its type is in no catalog, or
+it repeats one of its ancestors), renders nothing. Pass `fallbacks` to show your own view
+instead (see the [framework adapter blueprint][adapter-bp] §4.4):
+
+```swift
+Surface(
+  viewModel: surfaceViewModel,
+  catalogs: BasicCatalogImplementation.allCatalogs,
+  fallbacks: A2UIFallbacks(
+    pending: { info in
+      // `info.parentComponentType` is nil for the root, which is pending until it arrives.
+      info.parentComponentType == "List" ? AnyView(SkeletonRow()) : AnyView(ProgressView())
+    },
+    error: { info in
+      AnyView(Text("Can't show \(info.error.componentType ?? info.error.type)"))
+    }
+  )
+)
+```
+
+A builder that returns `nil` renders nothing, which takes no space. A fallback replaces the
+component in place once it arrives.
+
 ---
 
 ## 3. Creating custom SwiftUI components
@@ -70,6 +95,12 @@ let customProfileImplementation = ComponentImplementation(api: UserCardAPI()) { 
 ```
 
 2. Register the `ComponentImplementation` in a `Catalog<ComponentImplementation>` and pass it to `Surface(viewModel:catalogs:)`.
+
+Render children with `ComponentNodeView(node:)`: it renders the surface's fallback for a child
+that can't render. A child that hasn't arrived is a placeholder node (`node.state == .pending`)
+in `node.child(for:)` and `node.children(for:)`. A container that gives each child its own slot
+(spacing, a `Spacer`, a frame) should lay out `node.renderedChildren(for:in:defaultCatalogID:fallbacks:)`,
+which leaves out the children that render nothing, as the basic catalog's `Row` and `Column` do.
 
 ### Accessibility
 
