@@ -66,6 +66,10 @@ public final class NodeResolver: Sendable {
   package private(set) var lastResolvedNodeCount = 0
 
   private var activeNodes: [String: Node] = [:]
+  /// Pending and cyclic placeholders, keyed by `"<parent node key>><child node key>"` so that a
+  /// parent that resolves again keeps the same placeholder (a cyclic one shares its key with an
+  /// ancestor, so placeholders stay out of `activeNodes`).
+  private var placeholderNodes: [String: Node] = [:]
   private var schemaCache: [String: CachedComponentSchema] = [:]
   private var nodeRecords: [String: NodeResolutionRecord] = [:]
   private var nodesByDefinitionID: [String: Set<String>] = [:]
@@ -311,6 +315,7 @@ public final class NodeResolver: Sendable {
 
   private func resetResolutionState() {
     activeNodes.removeAll()
+    placeholderNodes.removeAll()
     nodeRecords.removeAll()
     nodesByDefinitionID.removeAll()
     parentsByChildDefinitionID.removeAll()
@@ -636,6 +641,10 @@ public final class NodeResolver: Sendable {
   private func pruneSubtree(_ nodeKey: String, protectedNodeKeys: Set<String> = []) {
     guard !protectedNodeKeys.contains(nodeKey) else { return }
     activeNodes.removeValue(forKey: nodeKey)
+    if !placeholderNodes.isEmpty {
+      let placeholderPrefix = "\(nodeKey)>"
+      placeholderNodes = placeholderNodes.filter { !$0.key.hasPrefix(placeholderPrefix) }
+    }
     let prefix = "\(nodeKey):"
     reportedExpressionErrors = reportedExpressionErrors.filter { !$0.hasPrefix(prefix) }
     expressionErrorsInCurrentPass.removeValue(forKey: nodeKey)
@@ -689,6 +698,7 @@ public final class NodeResolver: Sendable {
     nodesByAgentCall.removeAll()
     dirtyAgentCalls.removeAll()
     activeNodes.removeAll()
+    placeholderNodes.removeAll()
     nodeRecords.removeAll()
   }
 
@@ -777,7 +787,9 @@ public final class NodeResolver: Sendable {
     let type = component.type
     let effectiveCatalogID = component.catalogID ?? defaultCatalogID
     let targetCatalog = getCatalog(id: effectiveCatalogID)
+    var state = NodeState.resolved
     if let targetCatalog, targetCatalog.components[type] == nil {
+      state = .unknownType
       reportResolutionError(
         code: "UNKNOWN_COMPONENT_TYPE",
         message: "Component '\(definitionID)' has type '\(type)', which is not in catalog "
@@ -847,7 +859,7 @@ public final class NodeResolver: Sendable {
     registerNodeDependencies(record)
 
     if let existing = activeNodes[nodeKey],
-      existing.type == type && existing.catalogID == effectiveCatalogID
+      existing.type == type && existing.catalogID == effectiveCatalogID && existing.state == state
     {
       existing.updateProperties(resolvedProperties, metadata: component.metadata)
       return existing
@@ -855,8 +867,10 @@ public final class NodeResolver: Sendable {
 
     let node = Node(
       id: instanceID,
+      componentID: definitionID,
       type: type,
       catalogID: effectiveCatalogID,
+      state: state,
       properties: resolvedProperties,
       metadata: component.metadata
     )
@@ -886,14 +900,26 @@ public final class NodeResolver: Sendable {
       reportResolutionError(
         code: "CYCLIC_REFERENCE",
         message: "Component '\(childID)' at '\(dataPath)' is referenced by one of its own "
-          + "descendants; omitting the reference.",
+          + "descendants; rendering a placeholder instead.",
         dedupeKey: "CYCLIC_REFERENCE:\(childNodeKey)",
         sharedAcrossNodes: true
       )
-      return nil
+      return placeholder(
+        .cyclic,
+        instanceID: childInstanceID,
+        componentID: childID,
+        nodeKey: childNodeKey,
+        type: childIdentity?.type ?? Node.placeholderType
+      )
     }
     guard let childIdentity else {
-      return nil
+      return placeholder(
+        .pending,
+        instanceID: childInstanceID,
+        componentID: childID,
+        nodeKey: childNodeKey,
+        type: Node.placeholderType
+      )
     }
 
     let existingRecord = nodeRecords[childNodeKey]
@@ -933,6 +959,30 @@ public final class NodeResolver: Sendable {
       return childNode
     }
     return nil
+  }
+
+  /// Returns the placeholder for a child of the node being resolved, reusing the previous one
+  /// while it still applies so the parent's properties keep their identity.
+  private func placeholder(
+    _ state: NodeState,
+    instanceID: String,
+    componentID: String,
+    nodeKey: String,
+    type: String
+  ) -> Node {
+    let key = "\(currentComponentID ?? "")>\(nodeKey)"
+    if let existing = placeholderNodes[key], existing.state == state, existing.type == type {
+      return existing
+    }
+    let node = Node(
+      id: instanceID,
+      componentID: componentID,
+      type: type,
+      state: state,
+      properties: [:]
+    )
+    placeholderNodes[key] = node
+    return node
   }
 
   // MARK: - Property Classification & Extraction

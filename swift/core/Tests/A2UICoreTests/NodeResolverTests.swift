@@ -126,7 +126,7 @@ struct NodeResolverTests {
     #expect(children[0].string(for: "text") == "Hello World")
   }
 
-  @Test func childListSkipsUnarrivedComponents() throws {
+  @Test func childListKeepsPendingPlaceholderForUnarrivedComponent() throws {
     let catalog = try makeCatalog()
     // child1 not in components dictionary yet
     let components: [String: ComponentModel] = [
@@ -152,11 +152,103 @@ struct NodeResolverTests {
 
     let rootNode = try #require(resolver.resolveTree())
     let children = rootNode.children(for: "children")
-    #expect(children.count == 1)
-    #expect(children[0].id == "child2")
+    #expect(children.map(\.id) == ["child1", "child2"])
+    #expect(children[0].state == .pending)
+    #expect(children[0].isPlaceholder)
+    #expect(children[0].type == Node.placeholderType)
+    #expect(children[0].properties.isEmpty)
+    #expect(children[1].state == .resolved)
+    #expect(!children[1].isPlaceholder)
   }
 
-  @Test func cyclicReferencesReturnNilWithoutInfiniteLoop() throws {
+  @Test func pendingPlaceholderIsReplacedInPlaceWhenItsComponentArrives() throws {
+    let catalog = try makeCatalog()
+    let components = SurfaceComponentsModel(components: [
+      "root": ComponentModel(
+        id: "root",
+        type: "Container",
+        properties: ["child": .string("greeting")]
+      )
+    ])
+    let resolver = NodeResolver(
+      surfaceID: "s1",
+      catalogs: [catalog.id: catalog],
+      defaultCatalogID: catalog.id,
+      componentsModel: components,
+      dataModel: DataModel()
+    )
+
+    let rootNode = try #require(resolver.resolveTree())
+    let placeholder = try #require(rootNode.child(for: "child"))
+    #expect(placeholder.id == "greeting")
+    #expect(placeholder.state == .pending)
+
+    // Resolving again without the component keeps the same placeholder.
+    #expect(resolver.resolveTree()?.child(for: "child")?.box === placeholder.box)
+
+    components.addComponent(
+      ComponentModel(id: "greeting", type: "Text", properties: ["text": .string("Hello")])
+    )
+    let updatedRoot = try #require(resolver.resolveTree())
+    #expect(updatedRoot.box === rootNode.box)
+    let greeting = try #require(updatedRoot.child(for: "child"))
+    #expect(greeting.id == "greeting")
+    #expect(greeting.state == .resolved)
+    #expect(greeting.string(for: "text") == "Hello")
+  }
+
+  @Test func deletedComponentBecomesPendingPlaceholder() throws {
+    let catalog = try makeCatalog()
+    let components = SurfaceComponentsModel(components: [
+      "root": ComponentModel(
+        id: "root",
+        type: "Container",
+        properties: ["children": .array([.string("a"), .string("b")])]
+      ),
+      "a": ComponentModel(id: "a", type: "Text", properties: ["text": .string("A")]),
+      "b": ComponentModel(id: "b", type: "Text", properties: ["text": .string("B")]),
+    ])
+    let resolver = NodeResolver(
+      surfaceID: "s1",
+      catalogs: [catalog.id: catalog],
+      defaultCatalogID: catalog.id,
+      componentsModel: components,
+      dataModel: DataModel()
+    )
+    _ = resolver.resolveTree()
+
+    components.removeComponent("a")
+    let children = try #require(resolver.resolveTree()).children(for: "children")
+    #expect(children.map(\.id) == ["a", "b"])
+    #expect(children.map(\.state) == [.pending, .resolved])
+  }
+
+  @Test func unknownTypeNodeHasUnknownTypeState() throws {
+    let catalog = try makeCatalog()
+    let resolver = NodeResolver(
+      surfaceID: "s1",
+      catalogs: [catalog.id: catalog],
+      defaultCatalogID: catalog.id,
+      componentsModel: SurfaceComponentsModel(components: [
+        "root": ComponentModel(
+          id: "root",
+          type: "Container",
+          properties: ["child": .string("w")]
+        ),
+        "w": ComponentModel(id: "w", type: "Widget", properties: [:]),
+      ]),
+      dataModel: DataModel()
+    )
+
+    let rootNode = try #require(resolver.resolveTree())
+    #expect(rootNode.state == .resolved)
+    let widget = try #require(rootNode.child(for: "child"))
+    #expect(widget.type == "Widget")
+    #expect(widget.state == .unknownType)
+    #expect(widget.isPlaceholder)
+  }
+
+  @Test func cyclicReferenceResolvesToCyclicPlaceholderWithoutInfiniteLoop() throws {
     let catalog = try makeCatalog()
     let components: [String: ComponentModel] = [
       "root": ComponentModel(
@@ -187,8 +279,13 @@ struct NodeResolverTests {
     let rootNode = try #require(resolver.resolveTree())
     let aNode = try #require(rootNode.children(for: "children").first)
     let bNode = try #require(aNode.children(for: "children").first)
-    // b's reference back to a is detected as cyclic and omitted
-    #expect(bNode.children(for: "children").isEmpty)
+    // b's reference back to a is detected as cyclic and rendered as a placeholder.
+    let cyclic = try #require(bNode.children(for: "children").first)
+    #expect(bNode.children(for: "children").count == 1)
+    #expect(cyclic.id == "a")
+    #expect(cyclic.type == "Container")
+    #expect(cyclic.state == .cyclic)
+    #expect(cyclic.properties.isEmpty)
   }
 
   @Test func cyclicReferenceIsReportedOnce() throws {
@@ -230,7 +327,7 @@ struct NodeResolverTests {
     #expect(
       errors.first?.message
         == "Component 'a' at '/' is referenced by one of its own descendants; "
-        + "omitting the reference."
+        + "rendering a placeholder instead."
     )
     #expect(errors.first?.surfaceID == "s1")
 
@@ -364,9 +461,9 @@ struct NodeResolverTests {
     #expect(
       Set(errors.map(\.message)) == [
         "Component 'a' at '/' is referenced by one of its own descendants; "
-          + "omitting the reference.",
+          + "rendering a placeholder instead.",
         "Component 'b' at '/' is referenced by one of its own descendants; "
-          + "omitting the reference.",
+          + "rendering a placeholder instead.",
       ]
     )
 
@@ -1071,7 +1168,7 @@ struct NodeResolverTests {
 
     let root = try #require(resolver.resolveTree())
     #expect(resolver.lastResolvedNodeCount == 1)
-    #expect(root.child(for: "child") == nil)
+    #expect(root.child(for: "child")?.state == .pending)
 
     // 1. Delayed arrival of "greeting": root and greeting resolve, root keeps identity.
     componentsModel.addComponent(
@@ -1102,11 +1199,12 @@ struct NodeResolverTests {
     #expect(greetingContainer.type == "Container")
     #expect(greetingContainer.box !== greetingText.box)
 
-    // 3. Remove "greeting": only root resolves, child becomes nil, and old /msg dependency is pruned.
+    // 3. Remove "greeting": only root resolves, child becomes a pending placeholder, and old /msg
+    // dependency is pruned.
     componentsModel.removeComponent("greeting")
     _ = try #require(resolver.resolveTree())
     #expect(resolver.lastResolvedNodeCount == 1)
-    #expect(root.child(for: "child") == nil)
+    #expect(root.child(for: "child")?.state == .pending)
 
     dataModel.set("/msg", value: .string("Updated"))
     _ = try #require(resolver.resolveTree())

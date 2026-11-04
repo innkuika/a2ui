@@ -21,8 +21,10 @@ package final class NodeBox: Observable {
   private let registrar = ObservationRegistrar()
 
   nonisolated let id: String
+  nonisolated let componentID: String
   nonisolated let type: String
   nonisolated let catalogID: String?
+  nonisolated let state: NodeState
   private var _properties: [String: any Resolved]
   private var _metadata: [String: JSONValue]?
   package private(set) var revision: UInt64 = 0
@@ -40,14 +42,18 @@ package final class NodeBox: Observable {
 
   nonisolated init(
     id: String,
+    componentID: String? = nil,
     type: String,
     catalogID: String? = nil,
+    state: NodeState = .resolved,
     properties: [String: any Resolved],
     metadata: [String: JSONValue]? = nil
   ) {
     self.id = id
+    self.componentID = componentID ?? id
     self.type = type
     self.catalogID = catalogID
+    self.state = state
     self._properties = properties
     self._metadata = metadata
   }
@@ -122,13 +128,36 @@ package final class NodeBox: Observable {
   }
 }
 
+/// Why a node is or is not resolved.
+public enum NodeState: String, Sendable {
+  /// A component whose type has a catalog entry.
+  case resolved
+  /// A reference to a component the surface doesn't hold yet. A node for the component replaces
+  /// the placeholder at the same position when it arrives.
+  case pending
+  /// A component whose type has no entry in its catalog.
+  case unknownType = "unknown-type"
+  /// A reference that repeats one of its ancestors at the same data scope.
+  case cyclic
+}
+
 /// A resolved component representation.
 public struct Node: Identifiable, @preconcurrency Equatable, Sendable {
   package let box: NodeBox
 
   public var id: String { box.id }
+  /// The id of the component definition this node instantiates. Differs from ``id`` for nodes a
+  /// template repeats, whose ``id`` also names the data item.
+  public var componentID: String { box.componentID }
   public var type: String { box.type }
   public var catalogID: String? { box.catalogID }
+  /// Whether the node is a resolved component or a placeholder for one that can't render.
+  public var state: NodeState { box.state }
+  /// Whether the node stands in for a component that can't render (see ``state``).
+  public var isPlaceholder: Bool { state != .resolved }
+
+  /// The `type` of a ``NodeState/pending`` placeholder, which has no component definition.
+  public static let placeholderType = "Placeholder"
   @MainActor
   public var properties: [String: any Resolved] { box.properties }
   @MainActor
@@ -136,18 +165,22 @@ public struct Node: Identifiable, @preconcurrency Equatable, Sendable {
   @MainActor
   public var extensions: [String: JSONValue]? { MetadataValidator.extensions(from: box.metadata) }
 
-  /// Creates a new resolved component node.
+  /// Creates a new component node.
   public init(
     id: String,
+    componentID: String? = nil,
     type: String,
     catalogID: String? = nil,
+    state: NodeState = .resolved,
     properties: [String: any Resolved],
     metadata: [String: JSONValue]? = nil
   ) {
     self.box = NodeBox(
       id: id,
+      componentID: componentID,
       type: type,
       catalogID: catalogID,
+      state: state,
       properties: properties,
       metadata: metadata
     )
@@ -174,6 +207,7 @@ public struct Node: Identifiable, @preconcurrency Equatable, Sendable {
       return true
     }
     guard lhs.id == rhs.id && lhs.type == rhs.type && lhs.catalogID == rhs.catalogID,
+      lhs.componentID == rhs.componentID && lhs.state == rhs.state,
       MetadataValidator.areEqual(lhs.metadata, rhs.metadata),
       lhs.properties.count == rhs.properties.count
     else {

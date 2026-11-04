@@ -67,11 +67,6 @@ struct SuiteRegistryTests {
       #expect(mpV10Names.contains(errorName), "Unused expectedRuntimeErrors entry '\(errorName)'")
     }
 
-    let nodeResNames = Set(ConformanceTestHelper.cases("core/node_resolution.yaml").map(\.name))
-    for knownIssueName in NodeResolutionConformanceTests.placeholderKnownIssues.keys {
-      #expect(nodeResNames.contains(knownIssueName), "Unused known issue '\(knownIssueName)'")
-    }
-
     let scalingNames = Set(
       ConformanceTestHelper.cases("core/message_processor_scaling.yaml").map(\.name))
     for gapName in MessageProcessorScalingConformanceTests.knownGaps.keys {

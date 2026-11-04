@@ -65,13 +65,6 @@ private final class RecordingFunctionImplementation: FunctionImplementation, @un
 /// Runs the shared `conformance/core/node_resolution.yaml` suite.
 @MainActor
 struct NodeResolutionConformanceTests {
-  static let placeholderKnownIssues: [String: String] = [
-    "cyclic_component_reference_same_scope": "NodeResolver omits placeholder nodes",
-    "pending_child_replacement": "NodeResolver omits placeholder nodes",
-    "shared_definition_independent_instances": "NodeResolver omits placeholder nodes",
-    "unknown_component_type_placeholder": "NodeResolver omits placeholder nodes",
-  ]
-
   private static let knownCaseKeys: Set<String> = [
     "action",
     "expect",
@@ -120,8 +113,7 @@ struct NodeResolutionConformanceTests {
 
   @Test(arguments: ConformanceTestHelper.cases("core/node_resolution.yaml"))
   func nodeResolutionConformance(_ conformanceCase: ConformanceCase) throws {
-    let knownIssueReason = Self.placeholderKnownIssues[conformanceCase.name]
-    try ConformanceManifest.run(conformanceCase, knownIssueReason: knownIssueReason) {
+    try ConformanceManifest.run(conformanceCase) {
       try runResolveNodesCase(conformanceCase.rawDictionary)
     }
   }
@@ -461,9 +453,6 @@ struct NodeResolutionConformanceTests {
         rawChildren.indices.contains(idx),
         let childDefID = rawChildren[idx].stringValue
       {
-        guard surface.componentsModel.components[childDefID] != nil else {
-          return nil
-        }
         if let match = nodes.first(where: {
           $0.id == childDefID || $0.id.hasPrefix("\(childDefID)_")
             || $0.id.hasPrefix("\(childDefID):")
@@ -590,11 +579,15 @@ struct NodeResolutionConformanceTests {
     nodePath: String,
     caseName: String
   ) {
-    let expectedState = spec["state"] as? String ?? "resolved"
-    #expect(
-      expectedState == "resolved",
-      "[\(caseName)] \(nodePath) state mismatch: got 'resolved', expected '\(expectedState)'"
-    )
+    if let expectedState = spec["state"] as? String {
+      #expect(
+        node.state.rawValue == expectedState,
+        """
+        [\(caseName)] \(nodePath) state mismatch: got '\(node.state.rawValue)', \
+        expected '\(expectedState)'
+        """
+      )
+    }
     if let expectedCompID = spec["component_id"] as? String {
       let baseID = node.id.split(separator: ":").first.map(String.init) ?? node.id
       let strippedID = baseID.split(separator: "_").first.map(String.init) ?? baseID
