@@ -31,9 +31,11 @@ import {
   untracked,
   NgZone,
 } from '@angular/core';
-import {NgComponentOutlet} from '@angular/common';
+import {NgComponentOutlet, NgTemplateOutlet} from '@angular/common';
 import {
+  type A2uiFallbackRequest,
   type A2uiMetadata,
+  fallbackRequestFor,
   ComponentContext,
   type ComponentNode,
   ResolvedBinding,
@@ -53,6 +55,7 @@ import {A2UI_ACCESSIBILITY_TARGETS, provideAccessibilityTargets} from './accessi
 import {A2uiRendererService} from './a2ui-renderer.service';
 import {Child, ComponentBinder} from './component-binder.service';
 import {SurfaceNodeResolver} from './surface-node-resolver.service';
+import {A2UI_COMPONENT_TYPE, SurfaceFallbacks} from './fallbacks';
 import {BoundProperty} from './types';
 
 import type {AngularCatalog, AngularComponentImplementation} from '../catalog/types';
@@ -128,20 +131,27 @@ function findNodeInList(
  */
 @Component({
   selector: 'a2ui-v09-component-host',
-  imports: [NgComponentOutlet],
-  // The Angular component this host mounts marks its elements in these.
-  providers: [provideAccessibilityTargets()],
+  imports: [NgComponentOutlet, NgTemplateOutlet],
+  providers: [
+    // The Angular component this host mounts marks its elements in these.
+    provideAccessibilityTargets(),
+    // The hosts of this component's children report it as their parent.
+    {provide: A2UI_COMPONENT_TYPE, useFactory: () => inject(ComponentHostComponent).renderedType},
+  ],
   host: {
     style: 'display: contents;',
-    // Marks a host that renders nothing (its component has not resolved), so a container that
-    // wraps each child in an item element can drop that item too (see ListComponent).
-    '[attr.data-a2ui-empty]': 'componentType() ? null : ""',
+    // Marks a host that renders nothing (its component has not resolved and there is no fallback
+    // template for it), so a container that wraps each child in an item element can drop that
+    // item too (see ListComponent).
+    '[attr.data-a2ui-empty]': 'rendersNothing() ? "" : null',
   },
   // The quotes around the input keys passed to *ngComponentOutlet are critical to survive Closure
   // minification. Prettier keeps them (`quoteProps: "preserve"` in the root `.prettierrc`).
   template: `
     @if (componentType()) {
       <ng-container *ngComponentOutlet="componentType()!; inputs: componentInputs()"></ng-container>
+    } @else if (fallback(); as fallback) {
+      <ng-container *ngTemplateOutlet="fallback.template; context: fallback.context"></ng-container>
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -162,7 +172,22 @@ export class ComponentHostComponent {
   private readonly injector = inject(Injector);
   private readonly sharedResolver = inject(SurfaceNodeResolver, {optional: true});
   private readonly accessibilityTargets = inject(A2UI_ACCESSIBILITY_TARGETS, {self: true});
+  private readonly fallbacks = inject(SurfaceFallbacks, {optional: true});
+  private readonly parentType = inject(A2UI_COMPONENT_TYPE, {optional: true, skipSelf: true});
   private ownResolver?: SurfaceNodeResolver;
+
+  /** The type of the resolved component this host renders, if any. */
+  readonly renderedType = signal<string | undefined>(undefined);
+  /** What to render a fallback for while the component is unresolved. */
+  private readonly fallbackRequest = signal<A2uiFallbackRequest | undefined>(undefined);
+  private readonly webComponentMounted = signal(false);
+  protected readonly fallback = computed(() => {
+    const request = this.fallbackRequest();
+    return request && this.fallbacks?.viewFor(request);
+  });
+  protected readonly rendersNothing = computed(
+    () => !this.componentType() && !this.webComponentMounted() && !this.fallback(),
+  );
 
   protected readonly componentType = signal<Type<CatalogComponentInstance> | null>(null);
   protected readonly props = signal<Record<string, BoundProperty>>({});
@@ -176,10 +201,10 @@ export class ComponentHostComponent {
   protected readonly componentInputs = computed<Record<string, unknown>>(() => {
     const inputs: Record<string, unknown> = {
       // Quoted to prevent property renaming under Closure Compiler.
-      'props': this.props(),
-      'surfaceId': this.surfaceId(),
-      'componentId': this.resolvedComponentId,
-      'dataContextPath': this.resolvedDataContextPath,
+      props: this.props(),
+      surfaceId: this.surfaceId(),
+      componentId: this.resolvedComponentId,
+      dataContextPath: this.resolvedDataContextPath,
     };
     if (this.acceptsMetadata()) {
       inputs['metadata'] = this.metadata();
@@ -293,11 +318,22 @@ export class ComponentHostComponent {
     this.resolvedComponentId = id;
     this.resolvedDataContextPath = basePath;
 
+    this.fallbacks?.registerFor(surface);
     if (!node || node.isPlaceholder || !node.impl || !node.context) {
       this.reportUnresolved(surface, node, id);
+      const parentComponentType = this.parentType?.();
+      this.fallbackRequest.set(
+        node
+          ? fallbackRequestFor(node, parentComponentType)
+          : {
+              category: 'pending',
+              info: {componentId: id, ...(parentComponentType ? {parentComponentType} : {})},
+            },
+      );
       return;
     }
     this.resolvedNode = node;
+    this.renderedType.set(node.type);
     this.resolvedDataContextPath = node.dataPath;
 
     // Entries from `createComponentImplementation` carry both an Angular component and a Custom
@@ -406,6 +442,7 @@ export class ComponentHostComponent {
     el.node = node;
     this.mountedWcEl = el;
     this.elementRef.nativeElement.appendChild(el);
+    this.webComponentMounted.set(true);
   }
 
   /**
@@ -425,6 +462,8 @@ export class ComponentHostComponent {
 
     this.resolvedNode = undefined;
     this.activeSurface = undefined;
+    this.renderedType.set(undefined);
+    this.fallbackRequest.set(undefined);
 
     this.componentType.set(null);
     if (this.currentBoundProps) {
@@ -438,6 +477,7 @@ export class ComponentHostComponent {
     if (this.mountedWcEl) {
       this.mountedWcEl.remove();
       this.mountedWcEl = null;
+      this.webComponentMounted.set(false);
     }
   }
 }

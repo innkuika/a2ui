@@ -104,9 +104,12 @@ import {ListApi} from '@a2ui/web_core/v0_9/basic_catalog';
         display: inline-block;
       }
       /* A child that renders nothing gets no item: an empty <li> still shows a marker and
-         takes a gap. */
+         takes a gap. A fallback template that rendered no node leaves its host :empty (only
+         Angular's comment anchors). */
       li:has(> a2ui-v09-component-host[data-a2ui-empty]),
-      .a2ui-list-item-none:has(> a2ui-v09-component-host[data-a2ui-empty]) {
+      .a2ui-list-item-none:has(> a2ui-v09-component-host[data-a2ui-empty]),
+      li:has(> a2ui-v09-component-host:empty),
+      .a2ui-list-item-none:has(> a2ui-v09-component-host:empty) {
         display: none;
       }
     `,

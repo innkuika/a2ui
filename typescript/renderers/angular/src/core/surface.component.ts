@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-import {ChangeDetectionStrategy, Component, input} from '@angular/core';
+import {ChangeDetectionStrategy, Component, inject, input} from '@angular/core';
 import {ComponentHostComponent} from './component-host.component';
+import {type A2uiFallbackTemplates, SurfaceFallbacks} from './fallbacks';
 import {SurfaceNodeResolver} from './surface-node-resolver.service';
 
 /**
@@ -30,7 +31,7 @@ import {SurfaceNodeResolver} from './surface-node-resolver.service';
   selector: 'a2ui-v09-surface',
   standalone: true,
   imports: [ComponentHostComponent],
-  providers: [SurfaceNodeResolver],
+  providers: [SurfaceNodeResolver, SurfaceFallbacks],
   host: {
     style: 'display: contents;',
   },
@@ -52,4 +53,15 @@ export class SurfaceComponent {
    * Defaults to the root ('/').
    */
   dataContextPath = input<string>('/');
+
+  /**
+   * Templates for nodes that can't render yet (`pending`, including the root before it
+   * arrives) or at all (`error`), each rendered with `{$implicit: info}` as its context. A
+   * missing template, or one that renders no node, renders nothing.
+   */
+  fallbacks = input<A2uiFallbackTemplates>();
+
+  constructor() {
+    inject(SurfaceFallbacks).connect(this.fallbacks);
+  }
 }
