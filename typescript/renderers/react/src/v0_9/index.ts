@@ -24,6 +24,11 @@ export {
   useSignalValue,
 } from '../index';
 export type {
+  A2uiErrorInfo,
+  A2uiFallbackError,
+  A2uiFallbacks,
+  A2uiPendingInfo,
+  A2uiReactFallbacks,
   MarkdownComponentProps,
   NodeBuildChild,
   NodeViewProps,

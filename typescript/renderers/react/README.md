@@ -126,6 +126,22 @@ Running this example should display "Hello from A2UI!". The example demonstrates
 - [`updateComponents`](../../../specification/v0_9/docs/a2ui_protocol.md#updatecomponents) defines the UI tree. Here, a `Column` containing two `Text` components.
 - [`updateDataModel`](../../../specification/v0_9/docs/a2ui_protocol.md#updatedatamodel) provides the data that the components reference via [`path` bindings](../../../specification/v0_9/docs/a2ui_protocol.md#path-resolution--scope) (e.g. `{ path: '/title' }` resolves to the `title` field in the data model).
 
+### Fallbacks
+
+A component that hasn't arrived yet, or can't render (an unknown type, a cycle, an unresolved child reference), renders nothing by default. Pass `fallbacks` to show your own UI instead. Each builder gets `info` (`componentId`, `parentComponentType`, and for errors `error.type`) and returns a `ReactNode`, or `null` to render nothing:
+
+```tsx
+<A2uiSurface
+  surface={surface}
+  fallbacks={{
+    pending: info => (info.parentComponentType === 'List' ? <SkeletonRow /> : <Spinner />),
+    error: info => <InlineError type={info.error.type} />,
+  }}
+/>
+```
+
+`pending` also covers the root before it arrives. A fallback takes a child's place in any container, including the basic catalog's, and is replaced in place when the component arrives. Fallbacks render in your React tree, so they read your context. Errors still reach `surface.onError`; builders don't need to report them.
+
 ## Defining Custom Components
 
 A2UI v0.9 strictly separates a component's API (Schema) from its implementation.

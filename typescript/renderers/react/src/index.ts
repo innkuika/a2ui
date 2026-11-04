@@ -15,6 +15,13 @@
  */
 
 export {A2uiSurface, useA2uiSurface} from './A2uiSurface';
+export type {A2uiReactFallbacks} from './fallbacks';
+export type {
+  A2uiErrorInfo,
+  A2uiFallbackError,
+  A2uiFallbacks,
+  A2uiPendingInfo,
+} from '@a2ui/web_core/v0_9';
 export {createBinderlessComponentImplementation, createComponentImplementation} from './adapter';
 export {useNodeView, useSignalValue} from './node-view';
 export type {

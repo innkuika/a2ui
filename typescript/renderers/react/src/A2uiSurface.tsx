@@ -29,21 +29,42 @@ import React, {
   useContext,
   useLayoutEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
 } from 'react';
-import {NodeResolver, effect, getValue, peekValue, type SurfaceModel} from '@a2ui/web_core/v0_9';
+import {
+  NodeResolver,
+  effect,
+  getValue,
+  peekValue,
+  rootPendingRequest,
+  type SurfaceModel,
+} from '@a2ui/web_core/v0_9';
+import {registerFallbackRenderer} from '@a2ui/web_core/v0_9/universal';
 import {setMarkdownRenderer} from '@a2ui/web_core/v0_9/basic_catalog';
 import {prepareCatalogs} from './catalog/prepare_catalogs';
 import {ChildElement, HostedChildren, SurfaceContext, useA2uiSurface} from './node-view';
 import type {ReactCatalogComponent} from './react_component_implementation';
 import {MarkdownComponentContext, useMarkdownRenderer} from './markdown-context';
 import {registerMarkdownHostRenderer} from './markdown_hosts';
+import {
+  type A2uiReactFallbacks,
+  createFallbackRenderer,
+  FallbacksContext,
+  FallbackView,
+} from './fallbacks';
 
 export {useA2uiSurface};
 
 export const A2uiSurface: React.FC<{
   surface: SurfaceModel<ReactCatalogComponent>;
-}> = ({surface}) => {
+  /**
+   * The UI for nodes that can't render yet (`pending`, including the root
+   * before it arrives) or at all (`error`). A missing builder, or one that
+   * returns null or undefined, renders nothing.
+   */
+  fallbacks?: A2uiReactFallbacks;
+}> = ({surface, fallbacks}) => {
   // web_core's basic catalog reads its markdown renderer from a module-level
   // slot. A layout effect sets it during commit, so it is in place before any
   // Lit element in the surface updates. A surface without a renderer leaves
@@ -62,6 +83,22 @@ export const A2uiSurface: React.FC<{
     }
     return undefined;
   }, [markdownRenderer, hasMarkdownComponent]);
+
+  // Web Components in the surface render their unresolved children through
+  // web_core's fallback renderer, which reads the latest builders. Registered
+  // during commit, before any of them updates.
+  const fallbacksRef = useRef(fallbacks);
+  useLayoutEffect(() => {
+    fallbacksRef.current = fallbacks;
+  }, [fallbacks]);
+  useLayoutEffect(
+    () =>
+      registerFallbackRenderer(
+        surface,
+        createFallbackRenderer(() => fallbacksRef.current),
+      ),
+    [surface],
+  );
 
   // The resolver is created inside subscribe, which React calls only for
   // committed renders: a render that is discarded (concurrent mode,
@@ -104,16 +141,18 @@ export const A2uiSurface: React.FC<{
   );
   const root = useSyncExternalStore(subscribe, getSnapshot);
 
-  // Nothing to show until the root component arrives.
-  if (!root) {
-    return null;
-  }
   // A React host of this surface with no React-rendered element above it
   // (one created outside the surface's tree) gets its content from here.
   return (
-    <SurfaceContext.Provider value={surface}>
-      <ChildElement node={root} />
-      <HostedChildren surface={surface} owner={null} />
-    </SurfaceContext.Provider>
+    <FallbacksContext.Provider value={fallbacks}>
+      {root ? (
+        <SurfaceContext.Provider value={surface}>
+          <ChildElement node={root} />
+          <HostedChildren surface={surface} owner={null} />
+        </SurfaceContext.Provider>
+      ) : (
+        <FallbackView request={rootPendingRequest(surface.rootId)} />
+      )}
+    </FallbacksContext.Provider>
   );
 };

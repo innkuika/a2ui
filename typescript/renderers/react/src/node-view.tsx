@@ -50,8 +50,10 @@ import {
 } from 'react';
 import {createPortal} from 'react-dom';
 import {
+  type A2uiFallbackRequest,
   type A2uiMetadata,
   type ComponentContext,
+  fallbackRequestFor,
   type ComponentNode,
   isComponentNode,
   ResolvedBinding,
@@ -72,6 +74,7 @@ import type {
 import {WebComponentNode} from './web_component_node';
 import {HostOwner, HostRegistry} from './host_registry';
 import {HostedMarkdown} from './markdown_hosts';
+import {FallbackView, HostedFallbacks} from './fallbacks';
 
 export const SurfaceContext = createContext<SurfaceModel<ReactCatalogComponent> | undefined>(
   undefined,
@@ -115,6 +118,7 @@ const reportedUnresolved = new WeakMap<SurfaceModel<ReactCatalogComponent>, Set<
 
 /**
  * Stands in for a child reference the resolver built no node for. It renders
+ * the surface's `error` fallback (`error.type: 'unresolved-reference'`) or
  * nothing, like the other unresolved states, and reports the reference
  * through the surface's error channel once per (id, path), as the resolver
  * does for unknown types and cycles. The report runs in an effect:
@@ -126,7 +130,8 @@ export const UnresolvedChildReference: React.FC<{
   id: string;
   requestedPath: string;
   detail: string;
-}> = ({surface, id, requestedPath, detail}) => {
+  parentComponentType?: string;
+}> = ({surface, id, requestedPath, detail, parentComponentType}) => {
   const message = `Unresolved child reference '${id}' at '${requestedPath}': ${detail}`;
   useEffect(() => {
     let seen = reportedUnresolved.get(surface);
@@ -140,7 +145,18 @@ export const UnresolvedChildReference: React.FC<{
       void surface.dispatchError({code: 'UNRESOLVED_CHILD_REFERENCE', message});
     }
   }, [surface, id, requestedPath, message]);
-  return null;
+  const request = useMemo<A2uiFallbackRequest>(
+    () => ({
+      category: 'error',
+      info: {
+        componentId: id,
+        ...(parentComponentType !== undefined ? {parentComponentType} : {}),
+        error: {type: 'unresolved-reference'},
+      },
+    }),
+    [id, parentComponentType],
+  );
+  return <FallbackView request={request} />;
 };
 
 export function useSignalValue<T>(signal: Signal<T>): T {
@@ -327,6 +343,7 @@ export function useNodeView(
               `instances exist at ${elsewhere.join(', ')}. Instances are created only at ` +
               `the data paths the payload implies; buildChild selects among them.`
             }
+            parentComponentType={node.type}
           />
         );
       }
@@ -394,43 +411,62 @@ const RenderFallback: React.FC<{
 
 /**
  * Renders a node as its implementation's custom element. A pending,
- * unknown-type or cyclic node renders nothing: the resolver has already
- * reported unknown types and cycles to the surface, and a pending node is
- * replaced in place when its component arrives.
+ * unknown-type or cyclic node renders the surface's fallback for it, or
+ * nothing: the resolver has already reported unknown types and cycles to the
+ * surface, and a pending node is replaced in place when its component arrives.
  */
-export const ChildElement = memo(({node}: {node: ComponentNode<ReactCatalogComponent>}) => {
-  const ambientSurface = useContext(SurfaceContext);
-  const owner = useMemo(() => new HostOwner(), []);
-  if (node.isPlaceholder || !node.impl) {
-    return null;
-  }
-  const surface =
-    ambientSurface ?? (contextOf(node).dataContext.surface as SurfaceModel<ReactCatalogComponent>);
-  owner.surface = surface;
-  if ('render' in node.impl) {
-    // A React implementation: its host is React's own element, so its content
-    // is simply the element's children.
+export const ChildElement = memo(
+  ({
+    node,
+    parentComponentType,
+  }: {
+    node: ComponentNode<ReactCatalogComponent>;
+    /** The type of the component rendering `node`; absent for the root. */
+    parentComponentType?: string;
+  }) => {
+    const ambientSurface = useContext(SurfaceContext);
+    const owner = useMemo(() => new HostOwner(), []);
+    const request = useMemo(
+      () => fallbackRequestFor(node, parentComponentType),
+      [node, parentComponentType],
+    );
+    if (request) {
+      return <FallbackView request={request} />;
+    }
+    if (node.isPlaceholder || !node.impl) {
+      return null;
+    }
+    const surface =
+      ambientSurface ??
+      (contextOf(node).dataContext.surface as SurfaceModel<ReactCatalogComponent>);
+    owner.surface = surface;
+    if ('render' in node.impl) {
+      // A React implementation: its host is React's own element, so its content
+      // is simply the element's children.
+      return (
+        <>
+          <WebComponentNode node={node} owner={owner}>
+            <NodeContent node={node} />
+          </WebComponentNode>
+          <HostedMarkdown owner={owner} />
+          <HostedFallbacks owner={owner} />
+        </>
+      );
+    }
+    // A Web Component renders its own children, among them React hosts that
+    // React did not create. They register under this element, and their
+    // content is portaled from here, inside whatever the parent view wraps
+    // this element in.
     return (
       <>
-        <WebComponentNode node={node} owner={owner}>
-          <NodeContent node={node} />
-        </WebComponentNode>
+        <WebComponentNode node={node} owner={owner} />
+        <HostedChildren surface={surface} owner={owner} />
         <HostedMarkdown owner={owner} />
+        <HostedFallbacks owner={owner} />
       </>
     );
-  }
-  // A Web Component renders its own children, among them React hosts that
-  // React did not create. They register under this element, and their
-  // content is portaled from here, inside whatever the parent view wraps
-  // this element in.
-  return (
-    <>
-      <WebComponentNode node={node} owner={owner} />
-      <HostedChildren surface={surface} owner={owner} />
-      <HostedMarkdown owner={owner} />
-    </>
-  );
-});
+  },
+);
 ChildElement.displayName = 'ChildElement';
 
 /**
@@ -466,7 +502,7 @@ export const NodeContent = memo(({node}: {node: ComponentNode<ReactCatalogCompon
   const buildChild = useCallback<NodeBuildChild>(
     (child, basePath) => {
       if (isComponentNode(child)) {
-        return <ChildElement key={child.id} node={child} />;
+        return <ChildElement key={child.id} node={child} parentComponentType={node.type} />;
       }
 
       // The resolver turns every child reference it can identify into a
@@ -485,6 +521,7 @@ export const NodeContent = memo(({node}: {node: ComponentNode<ReactCatalogCompon
           id={child}
           requestedPath={requested}
           detail={detail}
+          parentComponentType={node.type}
         />
       );
     },

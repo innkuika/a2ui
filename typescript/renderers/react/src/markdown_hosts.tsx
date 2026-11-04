@@ -34,86 +34,13 @@ import type {MarkdownRenderer} from '@a2ui/web_core';
 import {getMarkdownRenderer, setMarkdownRenderer} from '@a2ui/web_core/v0_9/basic_catalog';
 import {type HostOwner, ownerAbove} from './host_registry';
 import {MarkdownComponentContext, type MarkdownComponentProps} from './markdown-context';
+import {OwnedHosts} from './owned_hosts';
 
 const TAG = 'a2ui-react-markdown';
 const ATTRIBUTE = 'data-markdown';
 
-/** A connected Markdown host and the Markdown it holds. */
-interface MarkdownHostEntry {
-  readonly host: Element;
-  readonly markdown: string;
-  /** Tells the portals apart, since a host's Markdown never changes. */
-  readonly key: string;
-}
-
-/** The Markdown hosts currently connected, by the owner whose content portals them. */
-class MarkdownHosts {
-  private readonly hosts = new Map<Element, {entry: MarkdownHostEntry; owner: HostOwner}>();
-  private readonly snapshots = new Map<HostOwner, readonly MarkdownHostEntry[]>();
-  private readonly listeners = new Map<HostOwner, Set<() => void>>();
-  private nextKey = 0;
-
-  add(host: Element, markdown: string, owner: HostOwner): void {
-    const current = this.hosts.get(host);
-    if (current?.owner === owner) return;
-    const key = current?.entry.key ?? String(this.nextKey++);
-    this.hosts.set(host, {entry: {host, markdown, key}, owner});
-    if (current) this.publish(current.owner);
-    this.publish(owner);
-  }
-
-  delete(host: Element): void {
-    const current = this.hosts.get(host);
-    if (!current) return;
-    this.hosts.delete(host);
-    this.publish(current.owner);
-  }
-
-  subscribe(owner: HostOwner, listener: () => void): () => void {
-    let listeners = this.listeners.get(owner);
-    if (!listeners) {
-      listeners = new Set();
-      this.listeners.set(owner, listeners);
-    }
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0) {
-        this.listeners.delete(owner);
-        this.snapshots.delete(owner);
-      }
-    };
-  }
-
-  /** The hosts owned by `owner`; the same array until they change. */
-  getSnapshot(owner: HostOwner): readonly MarkdownHostEntry[] {
-    let snapshot = this.snapshots.get(owner);
-    if (!snapshot) {
-      snapshot = this.compute(owner);
-      this.snapshots.set(owner, snapshot);
-    }
-    return snapshot;
-  }
-
-  private compute(owner: HostOwner): readonly MarkdownHostEntry[] {
-    const result: MarkdownHostEntry[] = [];
-    for (const {entry, owner: entryOwner} of this.hosts.values()) {
-      if (entryOwner === owner) result.push(entry);
-    }
-    return result;
-  }
-
-  private publish(owner: HostOwner): void {
-    if (!this.listeners.has(owner)) {
-      this.snapshots.delete(owner);
-      return;
-    }
-    this.snapshots.set(owner, this.compute(owner));
-    for (const listener of this.listeners.get(owner) ?? []) listener();
-  }
-}
-
-const markdownHosts = new MarkdownHosts();
+/** Markdown hosts, by the owner whose content portals them. */
+const markdownHosts = new OwnedHosts<string>();
 
 /**
  * Defines `<a2ui-react-markdown>` on first use, so importing the package does
@@ -199,9 +126,7 @@ const MarkdownPortals: React.FC<{
   const hosts = useSyncExternalStore(subscribe, getSnapshot);
   return (
     <>
-      {hosts.map(({host, markdown, key}) =>
-        createPortal(<Component markdown={markdown} />, host, key),
-      )}
+      {hosts.map(({host, value, key}) => createPortal(<Component markdown={value} />, host, key))}
     </>
   );
 };
