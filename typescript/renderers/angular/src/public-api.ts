@@ -24,6 +24,13 @@ export {
 export {ComponentHostComponent, type ComponentKey} from './core/component-host.component';
 export {AccessibilityTargetDirective, ValidationErrorsDirective} from './core/accessibility';
 export {SurfaceComponent} from './core/surface.component';
+export {
+  A2UI_COMPONENT_TYPE,
+  type A2uiFallbackContext,
+  type A2uiFallbackTemplates,
+  SurfaceFallbacks,
+} from './core/fallbacks';
+export type {A2uiErrorInfo, A2uiFallbackError, A2uiPendingInfo} from '@a2ui/web_core/v0_9';
 export {SurfaceNodeResolver} from './core/surface-node-resolver.service';
 export {CatalogComponent} from './core/catalog_component';
 export {type CatalogComponentInstance} from './core/catalog_component_instance';

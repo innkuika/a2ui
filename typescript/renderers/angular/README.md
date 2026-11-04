@@ -71,6 +71,26 @@ import {SurfaceComponent} from '@a2ui/angular/v0_9';
 export class AppComponent {}
 ```
 
+### Fallbacks
+
+A component that hasn't arrived yet, or can't render (an unknown type, a cycle), renders nothing by default. Pass `fallbacks` to show your own templates instead. Each template is rendered with `{$implicit: info}` (`componentId`, `parentComponentType`, and for errors `error.type`):
+
+```html
+<ng-template #pending let-info>
+  @if (info.parentComponentType === 'List') {
+  <div class="skeleton-row"></div>
+  } @else {
+  <my-spinner />
+  }
+</ng-template>
+<ng-template #error let-info>
+  <div class="error">{{ info.error.type }}</div>
+</ng-template>
+<a2ui-v09-surface surfaceId="main-surface" [fallbacks]="{pending: pending, error: error}" />
+```
+
+`pending` also covers the root before it arrives. A template that renders no element (for example a false `@if`) renders nothing and takes no space, so a List leaves out its item. A fallback is replaced in place when the component arrives. Errors still reach the surface's error listeners; templates don't need to report them.
+
 ### Dynamic Component Hosting
 
 For more fine-grained control, use the `ComponentHostComponent` to render specific components within a surface:

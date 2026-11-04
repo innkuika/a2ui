@@ -31,6 +31,7 @@ import {
 import type {AngularCatalog, AngularComponentImplementation} from './types';
 
 import {A2UI_ACCESSIBILITY_TARGETS} from '../core/accessibility';
+import {A2UI_COMPONENT_TYPE} from '../core/fallbacks';
 import {ComponentBinder} from '../core/component-binder.service';
 import type {BoundProperty} from '../core/types';
 
@@ -143,7 +144,11 @@ export class AngularWcHost extends HTMLElement {
         // The component marks its elements in this element's targets, not in
         // those of the `ComponentHostComponent` that may have created it.
         elementInjector: Injector.create({
-          providers: [{provide: A2UI_ACCESSIBILITY_TARGETS, useValue: this.accessibilityTargets}],
+          providers: [
+            {provide: A2UI_ACCESSIBILITY_TARGETS, useValue: this.accessibilityTargets},
+            // The hosts of the component's children report it as their parent.
+            {provide: A2UI_COMPONENT_TYPE, useValue: () => type},
+          ],
           parent: injector,
         }),
         hostElement: this,
