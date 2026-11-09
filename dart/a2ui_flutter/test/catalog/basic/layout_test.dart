@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:async';
+
 import 'package:a2ui_core/a2ui_core.dart';
 import 'package:a2ui_flutter/a2ui_flutter.dart';
+import 'package:a2ui_flutter/src/catalog/basic/basic_flex.dart';
 import 'package:a2ui_flutter/v0_9/basic_catalog.dart';
 // ignore: deprecated_member_use, see https://github.com/a2ui-project/a2ui/issues/3235
 import 'package:flutter/material.dart';
@@ -77,10 +80,10 @@ void main() {
   testWidgets('maps every justify and align value of the specification', (
     tester,
   ) async {
-    Flex flex() => tester.widget<Flex>(
+    BasicFlex flex() => tester.widget<BasicFlex>(
       find.descendant(
         of: find.byType(A2uiSurface),
-        matching: find.byType(Flex),
+        matching: find.byType(BasicFlex),
       ),
     );
     for (final (String? justify, MainAxisAlignment expected) in [
@@ -97,7 +100,7 @@ void main() {
         _flex('root', 'Column', ['a'], justify: justify),
         _text('a', 'A'),
       ], catalog: _catalog);
-      expect(flex().mainAxisAlignment, expected, reason: justify);
+      expect(flex().justify, expected, reason: justify);
     }
     for (final (String? align, CrossAxisAlignment expected) in [
       ('start', CrossAxisAlignment.start),
@@ -110,7 +113,7 @@ void main() {
         _flex('root', 'Column', ['a'], align: align),
         _text('a', 'A'),
       ], catalog: _catalog);
-      expect(flex().crossAxisAlignment, expected, reason: align);
+      expect(flex().align, expected, reason: align);
     }
   });
 
@@ -737,6 +740,155 @@ void main() {
     });
   });
 
+  group('collapsing at layout time', () {
+    const lenient = ValidationConfig(
+      allowDanglingReferences: true,
+      allowUnknownElements: true,
+    );
+
+    for (final wrapped in [false, true]) {
+      testWidgets('a delayed fallback takes a slot only once it appears'
+          '${wrapped ? ', under proxy boxes' : ''}', (tester) async {
+        const Widget delayed = _Delayed(
+          delay: Duration(milliseconds: 300),
+          child: SizedBox(key: ValueKey('skeleton'), height: 20),
+        );
+        await pumpComponents(
+          tester,
+          [
+            _flex('root', 'Column', ['a', 'late', 'b']),
+            _text('a', 'A'),
+            _text('b', 'B'),
+          ],
+          catalog: _catalog,
+          validationConfig: lenient,
+          fallbacks: A2uiFallbacks(
+            // Proxy boxes above the A2uiNothing collapse with it.
+            pending: (context, info) => wrapped
+                ? Semantics(
+                    label: 'loading',
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(),
+                      child: delayed,
+                    ),
+                  )
+                : delayed,
+          ),
+        );
+
+        expect(find.byKey(const ValueKey('skeleton')), findsNothing);
+        expect(
+          tester.getTopLeft(find.text('B')).dy,
+          tester.getBottomLeft(find.text('A')).dy + flexGap,
+        );
+
+        await tester.pump(const Duration(milliseconds: 300));
+
+        final Finder skeleton = find.byKey(const ValueKey('skeleton'));
+        expect(
+          tester.getTopLeft(skeleton).dy,
+          tester.getBottomLeft(find.text('A')).dy + flexGap,
+        );
+        expect(
+          tester.getTopLeft(find.text('B')).dy,
+          tester.getBottomLeft(skeleton).dy + flexGap,
+        );
+      });
+    }
+
+    testWidgets('a removed child collapses again', (tester) async {
+      final SurfaceHarness harness = await pumpComponents(
+        tester,
+        [
+          _flex('root', 'Row', ['a', 'mid', 'b'], justify: 'spaceBetween'),
+          _text('a', 'A', weight: 1),
+          _text('mid', 'Mid', weight: 1),
+          _text('b', 'B', weight: 1),
+        ],
+        catalog: _catalog,
+        host: boundedHost,
+      );
+      expect(
+        _size(tester, 'A').width,
+        moreOrLessEquals((_width - 2 * flexGap) / 3, epsilon: 0.01),
+      );
+
+      harness.surface().componentsModel.removeComponent('mid');
+      await tester.pump();
+
+      expect(find.text('Mid'), findsNothing);
+      expect(
+        _size(tester, 'A').width,
+        moreOrLessEquals((_width - flexGap) / 2, epsilon: 0.01),
+      );
+    });
+
+    testWidgets('a weighted component that renders nothing collapses, and '
+        'takes its slot back', (tester) async {
+      final SurfaceHarness harness = await pumpComponents(
+        tester,
+        [
+          _flex('root', 'Row', ['a', 'maybe']),
+          _text('a', 'A', weight: 1),
+          {
+            'id': 'maybe',
+            'component': 'Maybe',
+            'weight': 1,
+            'show': {'path': '/show'},
+          },
+        ],
+        catalog: basicTestCatalog([
+          BasicComponents.row,
+          BasicComponents.text,
+          ComponentImplementation(
+            name: 'Maybe',
+            schema: Schema.object(
+              properties: {
+                'weight': Schema.number(),
+                'show': CommonSchemas.dynamicBoolean,
+              },
+            ),
+            builder: (context, node, props, buildChild) =>
+                props.boolean('show') ?? false
+                ? const Text('Maybe')
+                : const A2uiNothing(),
+          ),
+        ]),
+        data: {'show': true},
+        host: boundedHost,
+      );
+      final double half = (_width - flexGap) / 2;
+      expect(_size(tester, 'A').width, moreOrLessEquals(half, epsilon: 0.01));
+
+      await harness.send([updateDataModel(false, path: '/show')]);
+      expect(_size(tester, 'A').width, moreOrLessEquals(_width, epsilon: 0.01));
+
+      await harness.send([updateDataModel(true, path: '/show')]);
+      expect(_size(tester, 'A').width, moreOrLessEquals(half, epsilon: 0.01));
+    });
+
+    testWidgets('runs a fallback builder once per build', (tester) async {
+      var calls = 0;
+      await pumpComponents(
+        tester,
+        [
+          _flex('root', 'Row', ['a', 'late']),
+          _text('a', 'A'),
+        ],
+        catalog: _catalog,
+        validationConfig: lenient,
+        fallbacks: A2uiFallbacks(
+          pending: (context, info) {
+            calls++;
+            return null;
+          },
+        ),
+      );
+
+      expect(calls, 1);
+    });
+  });
+
   group('Column', () {
     testWidgets('keeps the gap between children', (tester) async {
       await pumpComponents(tester, [
@@ -794,4 +946,36 @@ void main() {
       expect(_size(tester, 'Body').width, 400);
     });
   });
+}
+
+/// Shows nothing (collapsed) until [delay] passes, then [child].
+class _Delayed extends StatefulWidget {
+  const _Delayed({required this.delay, required this.child});
+
+  final Duration delay;
+  final Widget child;
+
+  @override
+  State<_Delayed> createState() => _DelayedState();
+}
+
+class _DelayedState extends State<_Delayed> {
+  late final Timer _timer;
+  bool _shown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(widget.delay, () => setState(() => _shown = true));
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _shown ? widget.child : const A2uiNothing();
 }

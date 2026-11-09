@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import 'package:a2ui_core/a2ui_core.dart';
 import 'package:flutter/widgets.dart';
 
 import 'a2ui_surface.dart';
-import 'component_implementation.dart';
-import 'node_view.dart';
 
 /// Builds the widget shown for an unresolved node described by [info], or
 /// returns null to show nothing.
 ///
-/// It may run more than once per build (see [buildChildOrNull]), so keep it
-/// free of side effects. An exception it throws is logged, and the node
+/// An exception it throws is logged, and the node
 /// shows nothing.
 typedef A2uiFallbackBuilder<I> = Widget? Function(BuildContext context, I info);
 
@@ -147,41 +143,4 @@ class A2uiFallbackError {
   @override
   String toString() =>
       'A2uiFallbackError(type: $type, componentType: $componentType)';
-}
-
-/// Builds [child] with [buildChild], or returns null when it shows nothing.
-///
-/// [child] shows nothing while it is unresolved and the surface's fallback
-/// for it is missing or returns null. A container that gives each child a
-/// widget of its own, such as a slot in a [Flex], lays out only the non-null
-/// results, so a child that shows nothing gets no slot, gap or flex share,
-/// while a fallback takes a slot like any other child:
-///
-/// ```dart
-/// Row(
-///   children: [
-///     for (final child in children)
-///       ?buildChildOrNull(context, child, buildChild),
-///   ],
-/// )
-/// ```
-Widget? buildChildOrNull(
-  BuildContext context,
-  ComponentNode<ComponentImplementation> child,
-  ChildWidgetBuilder buildChild,
-) {
-  final Widget built = buildChild(child);
-  // A builder that wraps each child puts a KeyedSubtree outermost, so look
-  // through those to the child's NodeView.
-  var inner = built;
-  while (inner is KeyedSubtree) {
-    inner = inner.child;
-  }
-  if (inner is NodeView &&
-      identical(inner.node, child) &&
-      child.isPlaceholder &&
-      inner.buildFallback(context) == null) {
-    return null;
-  }
-  return built;
 }

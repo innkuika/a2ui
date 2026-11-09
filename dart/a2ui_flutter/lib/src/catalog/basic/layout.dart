@@ -20,8 +20,8 @@ import 'package:flutter/widgets.dart';
 
 import '../../component_implementation.dart';
 import '../../component_props.dart';
-import '../../fallbacks.dart';
 import '../../signal_state.dart';
+import 'basic_flex.dart';
 
 /// The space between the children of a basic Row or Column.
 const double flexGap = 8;
@@ -109,16 +109,13 @@ class _FlexContainer extends StatefulWidget {
 class _FlexContainerState extends State<_FlexContainer> with SignalState {
   List<void Function()> _unsubscribes = const [];
 
-  /// The children laid out in the last build, those that render something,
-  /// and their slots.
-  List<ComponentNode<ComponentImplementation>> _shown = const [];
   List<(int, bool)> _slots = const [];
 
   void _subscribe() {
     _unsubscribes = [
       for (final child in widget.children)
         listenAfterFirst(child.props, (_) {
-          if (!listEquals(_shown.map(_slotOf).toList(), _slots)) {
+          if (!listEquals(widget.children.map(_slotOf).toList(), _slots)) {
             signalChanged();
           }
         }),
@@ -154,66 +151,25 @@ class _FlexContainerState extends State<_FlexContainer> with SignalState {
 
   @override
   Widget build(BuildContext context) {
-    final horizontal = widget.direction == Axis.horizontal;
-    final children = <ComponentNode<ComponentImplementation>>[];
-    final built = <Widget>[];
-    for (final ComponentNode<ComponentImplementation> child
-        in widget.children) {
-      if (buildChildOrNull(context, child, widget.buildChild)
-          case final Widget view) {
-        children.add(child);
-        built.add(view);
-      }
-    }
-    _shown = children;
+    final List<ComponentNode<ComponentImplementation>> children =
+        widget.children;
     final List<(int, bool)> slots = _slots = children.map(_slotOf).toList();
-    final bool weighted = slots.any((slot) => slot.$1 > 0);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final (bool mainBounded, bool crossBounded) = horizontal
-            ? (constraints.hasBoundedWidth, constraints.hasBoundedHeight)
-            : (constraints.hasBoundedHeight, constraints.hasBoundedWidth);
-        final double gaps = flexGap * (children.length - 1);
-        final double width = math.max(0, constraints.maxWidth - gaps);
-        final double share = horizontal && mainBounded
-            ? width / children.length
-            : double.infinity;
-        Widget item(int i) {
-          final (int flex, bool ownWidth) = slots[i];
-          final factor = !mainBounded
-              ? 0
-              : horizontal && !weighted
-              ? (ownWidth ? 0 : 1)
-              : flex;
-          return KeyedSubtree(
+    return BasicFlex(
+      direction: widget.direction,
+      justify: widget.justify,
+      align: widget.align,
+      spacing: flexGap,
+      children: [
+        for (var i = 0; i < children.length; i++)
+          KeyedSubtree(
             key: NodeKey(children[i].instanceId),
-            child: Flexible(
-              flex: factor,
-              fit: flex > 0 ? FlexFit.tight : FlexFit.loose,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: horizontal && factor == 0 ? share : double.infinity,
-                ),
-                child: built[i],
-              ),
+            child: BasicFlexItem(
+              weight: slots[i].$1,
+              ownWidth: slots[i].$2,
+              child: widget.buildChild(children[i]),
             ),
-          );
-        }
-
-        return Flex(
-          direction: widget.direction,
-          mainAxisSize: mainBounded && widget.justify != MainAxisAlignment.start
-              ? MainAxisSize.max
-              : MainAxisSize.min,
-          mainAxisAlignment: widget.justify,
-          crossAxisAlignment:
-              widget.align == CrossAxisAlignment.stretch && !crossBounded
-              ? CrossAxisAlignment.start
-              : widget.align,
-          spacing: flexGap,
-          children: [for (var i = 0; i < children.length; i++) item(i)],
-        );
-      },
+          ),
+      ],
     );
   }
 }

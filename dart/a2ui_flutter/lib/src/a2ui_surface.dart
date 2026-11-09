@@ -19,6 +19,7 @@ import 'component_implementation.dart';
 import 'fallbacks.dart';
 import 'fallbacks_scope.dart';
 import 'node_view.dart';
+import 'nothing.dart';
 import 'signal_state.dart';
 import 'surface_scope.dart';
 
@@ -122,5 +123,5 @@ class _RootPending extends StatelessWidget {
         FallbacksScope.maybeOf(context)?.pending,
         A2uiPendingInfo(componentId: surface.rootId),
       ) ??
-      const SizedBox.shrink();
+      const A2uiNothing();
 }

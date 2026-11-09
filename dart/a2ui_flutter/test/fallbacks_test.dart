@@ -17,7 +17,6 @@ import 'package:a2ui_flutter/a2ui_flutter.dart';
 // ignore: deprecated_member_use, see https://github.com/a2ui-project/a2ui/issues/3235
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:json_schema_builder/json_schema_builder.dart';
 
 import 'support/fixture_catalog.dart';
 
@@ -290,93 +289,22 @@ void main() {
     expect(find.text('pending root'), findsOneWidget);
   });
 
-  group('buildChildOrNull', () {
-    late List<Widget?> built;
-
-    setUp(() {
-      built = [];
-      surface = SurfaceModel<ComponentImplementation>(
-        's',
-        defaultCatalog: CatalogImplementation(
-          id: fixtureCatalogId,
-          components: [
-            ...fixtureCatalog().components.values,
-            ComponentImplementation(
-              name: 'Spy',
-              schema: Schema.object(
-                properties: {'children': CommonSchemas.childList},
-              ),
-              builder: (context, node, props, buildChild) {
-                built = [
-                  for (final child in props.children('children'))
-                    buildChildOrNull(context, child, buildChild),
-                ];
-                return Column(children: built.nonNulls.toList());
-              },
-            ),
-            // Wraps each child in a KeyedSubtree, as the README asks of a
-            // builder that wraps its children.
-            ComponentImplementation(
-              name: 'KeyedSpy',
-              schema: Schema.object(
-                properties: {'children': CommonSchemas.childList},
-              ),
-              builder: (context, node, props, buildChild) {
-                Widget keyed(ComponentNode<ComponentImplementation> child) =>
-                    KeyedSubtree(
-                      key: NodeKey(child.instanceId),
-                      child: buildChild(child),
-                    );
-                built = [
-                  for (final child in props.children('children'))
-                    buildChildOrNull(context, child, keyed),
-                ];
-                return Column(children: built.nonNulls.toList());
-              },
-            ),
-          ],
-        ),
-      );
+  testWidgets('builders run once per node and build', (tester) async {
+    var calls = 0;
+    add('root', 'Column', {
+      'children': ['late'],
     });
 
-    testWidgets('looks through a KeyedSubtree the builder wraps a child in', (
+    await pumpRoot(
       tester,
-    ) async {
-      add('root', 'KeyedSpy', {
-        'children': ['text', 'late'],
-      });
-      add('text', 'Text', {'text': 'Text'});
+      A2uiFallbacks(
+        pending: (context, info) {
+          calls++;
+          return const Text('pending');
+        },
+      ),
+    );
 
-      await pumpRoot(tester, A2uiFallbacks(pending: (context, info) => null));
-      expect(built, [isA<KeyedSubtree>(), isNull]);
-
-      await pumpRoot(tester, recording);
-      expect(built, [isA<KeyedSubtree>(), isA<KeyedSubtree>()]);
-    });
-
-    testWidgets('returns null for a child that shows nothing', (tester) async {
-      add('root', 'Spy', {
-        'children': ['text', 'late'],
-      });
-      add('text', 'Text', {'text': 'Text'});
-
-      await pumpRoot(tester, A2uiFallbacks(pending: (context, info) => null));
-
-      expect(built, [isA<Widget>(), isNull]);
-    });
-
-    testWidgets('returns a widget for a child with a fallback', (tester) async {
-      add('root', 'Spy', {
-        'children': ['late'],
-      });
-
-      await pumpRoot(tester, recording);
-
-      expect(built, [isA<Widget>()]);
-      expect(find.text('pending late'), findsOneWidget);
-      expect(infos.toSet(), {
-        const A2uiPendingInfo(componentId: 'late', parentComponentType: 'Spy'),
-      });
-    });
+    expect(calls, 1);
   });
 }

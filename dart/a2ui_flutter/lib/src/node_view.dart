@@ -20,6 +20,7 @@ import 'component_implementation.dart';
 import 'component_props.dart';
 import 'fallbacks.dart';
 import 'fallbacks_scope.dart';
+import 'nothing.dart';
 import 'signal_state.dart';
 
 /// Renders one [ComponentNode] and rebuilds when the node's own props change.
@@ -152,7 +153,7 @@ class _NodeViewState extends State<NodeView> with SignalState {
     _disposeBuildEffect = null;
     final ComponentNode<ComponentImplementation> node = widget.node;
     if (node.state != NodeState.resolved) {
-      return widget.buildFallback(context) ?? const SizedBox.shrink();
+      return widget.buildFallback(context) ?? const A2uiNothing();
     }
     late final Widget built;
     var isInitialBuild = true;
